@@ -76,7 +76,7 @@ The `BAGELAdOptimization` class modifies ad content:
 ## Notebook Demo
 
 A Jupyter notebook demonstrating the BAGEL integration is available at:
-https://gist.github.com/BlackBoyZeus/c08ace62245817fd7b9af3a9e29efa37
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/BlackBoyZeus/CrowdFace/blob/main/CrowdFace_Demo.ipynb)
 
 ## Requirements
 
@@ -84,4 +84,6 @@ https://gist.github.com/BlackBoyZeus/c08ace62245817fd7b9af3a9e29efa37
 - PyTorch
 - OpenCV
 - Transformers
+- Accelerate
+- Hugging Face Hub
 - BAGEL model weights (available from ByteDance)
