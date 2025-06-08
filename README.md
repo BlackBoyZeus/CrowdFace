@@ -14,13 +14,33 @@ CrowdFace is an advanced computer vision system that combines state-of-the-art s
 - **Multi-platform Support**: Works on various operating systems with GPU acceleration
 - **AWS Integration**: Seamless deployment and scaling on AWS infrastructure
 
+## Demo Notebook
+
+Try our interactive demo notebook:
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/BlackBoyZeus/CrowdFace/blob/main/CrowdFace_Demo.ipynb)
+
+The notebook demonstrates the complete pipeline including:
+- Loading SAM2, RVM, and BAGEL models
+- Processing uploaded videos
+- Intelligent ad placement with scene understanding
+- Contextual ad optimization
+
 ## Architecture
 
 The system consists of three main components:
 
-1. **Segmentation Module**: Identifies and segments people in crowd scenes
-2. **Matting Module**: Creates precise alpha mattes for seamless integration
-3. **Injection Module**: Places advertisements contextually within the scene
+1. **Segmentation Module**: Identifies and segments people in crowd scenes using SAM2
+2. **Matting Module**: Creates precise alpha mattes for seamless integration using RVM
+3. **Injection Module**: Places advertisements contextually within the scene using BAGEL
+
+### BAGEL Integration
+
+The BAGEL (ByteDance Ad Generation and Embedding Library) integration provides:
+- Scene understanding and context analysis
+- Intelligent ad placement based on scene content
+- Ad content optimization to match scene mood and context
+
+For more details, see [BAGEL_INTEGRATION.md](BAGEL_INTEGRATION.md).
 
 ## Requirements
 
@@ -35,6 +55,8 @@ The system consists of three main components:
 - OpenCV
 - Transformers
 - Diffusers
+- Accelerate
+- Hugging Face Hub
 
 ### System Requirements
 - CUDA-capable GPU (recommended)
@@ -47,8 +69,8 @@ The system consists of three main components:
 
 ```bash
 # Clone the repository
-git clone https://git-codecommit.us-east-1.amazonaws.com/v1/repos/crowdface
-cd crowdface
+git clone https://github.com/BlackBoyZeus/CrowdFace.git
+cd CrowdFace
 
 # Install Rust dependencies
 cd src/rust
@@ -71,6 +93,31 @@ cargo run --bin crowdface-server -- --config config.json
 
 # Process a video file
 python src/python/process_video.py --input video.mp4 --output output.mp4 --ad ad_image.png
+```
+
+### Using the Python API
+
+```python
+from src.python.bagel_loader import load_bagel_model
+from src.python.crowdface_pipeline import CrowdFacePipeline
+
+# Load models
+bagel_model, bagel_inferencer = load_bagel_model("models/BAGEL-7B-MoT")
+
+# Initialize pipeline
+pipeline = CrowdFacePipeline(
+    sam_model=sam_model,
+    sam_processor=sam_processor,
+    rvm_model=rvm_model,
+    bagel_inferencer=bagel_inferencer
+)
+
+# Process video
+pipeline.process_video(
+    video_path="input.mp4",
+    ad_image="ad.png",
+    output_path="output.mp4"
+)
 ```
 
 ## License
