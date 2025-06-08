@@ -1,52 +1,69 @@
 """
-CrowdFacePipeline - Main pipeline for CrowdFace system
+CrowdFace Python API
+Neural-Adaptive Crowd Segmentation with Contextual Pixel-Space Advertisement Integration
 """
 
 import os
-import torch
-import numpy as np
 import cv2
+import numpy as np
+import torch
 from PIL import Image
-from tqdm import tqdm
-from typing import Dict, List, Optional, Tuple, Union, Any
+from typing import List, Tuple, Optional, Union
+
 
 class CrowdFacePipeline:
-    def __init__(self, sam_model, sam_processor, rvm_model, bagel_inferencer=None):
+    """Main pipeline for CrowdFace video processing with ad integration"""
+    
+    def __init__(
+        self,
+        sam_model,
+        sam_processor,
+        rvm_model,
+        bagel_inferencer=None
+    ):
         """
         Initialize the CrowdFace pipeline
         
         Args:
             sam_model: SAM2 model for segmentation
-            sam_processor: SAM2 processor
-            rvm_model: RVM model for matting
-            bagel_inferencer: BAGEL model inferencer (optional)
+            sam_processor: SAM2 processor for image preprocessing
+            rvm_model: RVM model for video matting
+            bagel_inferencer: BAGEL model for ad placement (optional)
         """
         self.sam_model = sam_model
         self.sam_processor = sam_processor
         self.rvm_model = rvm_model
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.bagel_inferencer = bagel_inferencer
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
-        # Import BAGEL components only if inferencer is provided
-        if bagel_inferencer is not None:
-            from bagel import BAGELSceneUnderstanding, BAGELAdPlacement, BAGELAdOptimization
-            self.scene_analyzer = BAGELSceneUnderstanding(bagel_inferencer)
-            self.ad_placer = BAGELAdPlacement(bagel_inferencer)
-            self.ad_optimizer = BAGELAdOptimization(bagel_inferencer)
-        else:
-            self.scene_analyzer = None
-            self.ad_placer = None
-            self.ad_optimizer = None
-        
-    def segment_people(self, frame):
+        # Initialize state variables for video processing
+        self.prev_frame = None
+        self.prev_fgr = None
+        self.prev_pha = None
+        self.prev_state = None
+    
+    def segment_people(self, frame: np.ndarray) -> np.ndarray:
         """
         Segment people in the frame using SAM2
         
         Args:
-            frame: The video frame
+            frame: Input video frame
             
         Returns:
-            Segmentation mask
+            Binary mask of people in the frame
         """
+        if self.sam_model is None or self.sam_processor is None:
+            # Create a simple placeholder mask for demonstration
+            mask = np.zeros((frame.shape[0], frame.shape[1]), dtype=np.uint8)
+            # Add a simple ellipse as a "person"
+            cv2.ellipse(
+                mask, 
+                (frame.shape[1]//2, frame.shape[0]//2),
+                (frame.shape[1]//4, frame.shape[0]//2),
+                0, 0, 360, 255, -1
+            )
+            return mask
+            
         # Convert frame to RGB if it's in BGR format
         if isinstance(frame, np.ndarray) and frame.shape[2] == 3:
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -67,11 +84,9 @@ class CrowdFacePipeline:
             inputs["reshaped_input_sizes"].cpu()
         )
         
-        # Filter masks to only include people (this is a simplified approach)
-        # In a real implementation, you would use a classifier to identify people
+        # Take the largest mask as a person (simplified approach)
         combined_mask = np.zeros((frame.shape[0], frame.shape[1]), dtype=np.uint8)
         
-        # Take the largest mask as a person (simplified approach)
         if len(masks) > 0 and len(masks[0]) > 0:
             largest_mask = None
             largest_area = 0
@@ -87,23 +102,19 @@ class CrowdFacePipeline:
                 combined_mask = largest_mask.astype(np.uint8) * 255
         
         return combined_mask
-        
-    def generate_matte(self, frame, prev_frame=None, prev_fgr=None, prev_pha=None, prev_state=None):
+    
+    def generate_matte(self, frame: np.ndarray) -> np.ndarray:
         """
         Generate alpha matte using RVM
         
         Args:
-            frame: The video frame
-            prev_frame: Previous frame tensor
-            prev_fgr: Previous foreground tensor
-            prev_pha: Previous alpha tensor
-            prev_state: Previous RVM state
+            frame: Input video frame
             
         Returns:
-            Tuple of (alpha_matte, foreground, alpha, state)
+            Alpha matte for the frame
         """
         if self.rvm_model is None:
-            # Fallback to simple mask if RVM is not available
+            # Fallback to simple segmentation
             return self.segment_people(frame)
             
         try:
@@ -112,102 +123,98 @@ class CrowdFacePipeline:
             frame_tensor = frame_tensor.to(self.device)
             
             # Initialize previous frame and state if not provided
-            if prev_frame is None:
-                prev_frame = torch.zeros_like(frame_tensor)
-            if prev_fgr is None:
-                prev_fgr = torch.zeros_like(frame_tensor)
-            if prev_pha is None:
-                prev_pha = torch.zeros((1, 1, frame.shape[0], frame.shape[1]), device=self.device)
-            if prev_state is None:
-                prev_state = None
+            if self.prev_frame is None:
+                self.prev_frame = torch.zeros_like(frame_tensor)
+            if self.prev_fgr is None:
+                self.prev_fgr = torch.zeros_like(frame_tensor)
+            if self.prev_pha is None:
+                self.prev_pha = torch.zeros((1, 1, frame.shape[0], frame.shape[1]), device=self.device)
                 
             # Generate matte
             with torch.no_grad():
-                fgr, pha, state = self.rvm_model(frame_tensor, prev_frame, prev_fgr, prev_pha, prev_state)
+                fgr, pha, state = self.rvm_model(
+                    frame_tensor, 
+                    self.prev_frame, 
+                    self.prev_fgr, 
+                    self.prev_pha, 
+                    self.prev_state
+                )
+                
+            # Update state for next frame
+            self.prev_frame = frame_tensor
+            self.prev_fgr = fgr
+            self.prev_pha = pha
+            self.prev_state = state
                 
             # Convert alpha matte to numpy array
             alpha_matte = pha[0, 0].cpu().numpy() * 255
             alpha_matte = alpha_matte.astype(np.uint8)
             
-            return alpha_matte, fgr, pha, state
+            return alpha_matte
             
         except Exception as e:
             print(f"Error in RVM matting: {e}")
             # Fallback to segmentation mask
-            return self.segment_people(frame), None, None, None
-        
-    def find_ad_placement(self, frame, mask, scene_info=None):
+            return self.segment_people(frame)
+    
+    def find_ad_placement(self, frame: np.ndarray, mask: np.ndarray) -> Tuple[int, int]:
         """
         Find suitable locations for ad placement
         
         Args:
-            frame: The video frame
-            mask: Segmentation mask
-            scene_info: Scene analysis information
+            frame: Input video frame
+            mask: Binary mask of people in the frame
             
         Returns:
-            Tuple of (x, y) coordinates for ad placement
+            (x, y) coordinates for ad placement
         """
-        # Use BAGEL-enhanced ad placement if available
-        if self.ad_placer is not None and scene_info is not None:
-            return self.ad_placer.find_optimal_placement(frame, mask, scene_info)
+        # Use BAGEL if available
+        if self.bagel_inferencer is not None:
+            try:
+                # This would be the actual BAGEL implementation
+                # For now, we'll use a placeholder
+                scene_analysis = self.bagel_inferencer.analyze_scene(frame)
+                return scene_analysis.get_optimal_placement()
+            except Exception as e:
+                print(f"Error in BAGEL ad placement: {e}")
+                # Fall back to basic placement
         
-        # Fall back to original method if BAGEL is not available
+        # Basic placement logic
         binary_mask = (mask > 128).astype(np.uint8)
         contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
         if not contours:
-            return None
+            # Default to center-right if no contours found
+            return (frame.shape[1] * 3 // 4, frame.shape[0] // 2)
             
         largest_contour = max(contours, key=cv2.contourArea)
         x, y, w, h = cv2.boundingRect(largest_contour)
         
         # Default placement to the right of the person
-        ad_x = x + w + 20
+        ad_x = min(x + w + 20, frame.shape[1] - 100)
         ad_y = y
         
         return (ad_x, ad_y)
-        
-    def optimize_ad(self, ad_image, scene_info=None):
-        """
-        Optimize ad content based on scene context
-        
-        Args:
-            ad_image: The advertisement image
-            scene_info: Scene analysis information
-            
-        Returns:
-            Optimized advertisement image
-        """
-        if self.ad_optimizer is not None and scene_info is not None:
-            return self.ad_optimizer.optimize_ad_for_scene(ad_image, scene_info)
-        return ad_image
-        
-    def place_ad(self, frame, ad_image, position, scale=0.5, scene_info=None):
+    
+    def place_ad(
+        self, 
+        frame: np.ndarray, 
+        ad_image: Union[np.ndarray, Image.Image], 
+        position: Tuple[int, int], 
+        scale: float = 0.3
+    ) -> np.ndarray:
         """
         Place the ad in the frame at the specified position
         
         Args:
-            frame: The video frame
-            ad_image: The advertisement image
+            frame: Input video frame
+            ad_image: Advertisement image (with alpha channel)
             position: (x, y) coordinates for placement
-            scale: Size scale factor for the ad
-            scene_info: Scene analysis information
+            scale: Scale factor for the ad image
             
         Returns:
             Frame with ad placed
         """
-        # Optimize ad content if scene info is available
-        if scene_info is not None and self.ad_optimizer is not None:
-            ad_image = self.optimize_ad(ad_image, scene_info)
-            
-        # Determine optimal scale based on scene context
-        if scene_info is not None and "description" in scene_info:
-            if "crowded" in scene_info["description"].lower():
-                scale = 0.3  # Smaller ads in crowded scenes
-            elif "spacious" in scene_info["description"].lower():
-                scale = 0.7  # Larger ads in spacious scenes
-        
         # Convert ad_image to numpy array if it's a PIL Image
         if isinstance(ad_image, Image.Image):
             ad_image = np.array(ad_image)
@@ -254,87 +261,56 @@ class CrowdFacePipeline:
             result[y:y+ad_height, x:x+ad_width] = ad_resized
             
         return result
-        
-    def process_video(self, video_path, ad_image, output_path, max_frames=None):
+    
+    def process_video(
+        self, 
+        frames: List[np.ndarray], 
+        ad_image: Union[np.ndarray, Image.Image], 
+        output_path: Optional[str] = None, 
+        display_results: bool = True
+    ) -> List[np.ndarray]:
         """
-        Process the entire video with BAGEL-enhanced intelligence
+        Process video frames with ad placement
         
         Args:
-            video_path: Path to input video
-            ad_image: Advertisement image or path
-            output_path: Path for output video
-            max_frames: Maximum number of frames to process
+            frames: List of video frames
+            ad_image: Advertisement image
+            output_path: Path to save the output video
+            display_results: Whether to display results
+            
+        Returns:
+            List of processed frames
         """
-        # Open the video file
-        cap = cv2.VideoCapture(video_path)
-        if not cap.isOpened():
-            print(f"Error: Could not open video file {video_path}")
-            return
-            
-        # Get video properties
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        from tqdm.auto import tqdm
         
-        if max_frames is not None:
-            frame_count = min(frame_count, max_frames)
-            
-        # Create video writer
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+        results = []
         
-        # Load ad image
-        if isinstance(ad_image, str):
-            ad_img = cv2.imread(ad_image, cv2.IMREAD_UNCHANGED)
-        else:
-            ad_img = ad_image
-            
-        # Process each frame
-        frame_idx = 0
-        ad_position = None
-        scene_info = None
-        prev_fgr, prev_pha, prev_state = None, None, None
+        # Reset state variables
+        self.prev_frame = None
+        self.prev_fgr = None
+        self.prev_pha = None
+        self.prev_state = None
         
-        for _ in tqdm(range(frame_count), desc="Processing video"):
-            ret, frame = cap.read()
-            if not ret:
-                break
+        for i, frame in enumerate(tqdm(frames, desc="Processing frames")):
+            # Every 10 frames, re-detect people and ad placement
+            if i % 10 == 0:
+                mask = self.generate_matte(frame)
+                ad_position = self.find_ad_placement(frame, mask)
+            
+            # Place the ad
+            result_frame = self.place_ad(frame, ad_image, ad_position)
+            results.append(result_frame)
+            
+        # Save video if output path is provided
+        if output_path:
+            height, width = results[0].shape[:2]
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+            out = cv2.VideoWriter(output_path, fourcc, 30, (width, height))
+            
+            for frame in results:
+                out.write(frame)
                 
-            # Every 30 frames, analyze scene and re-detect people and ad placement
-            if frame_idx % 30 == 0:
-                # Analyze scene with BAGEL if available
-                if self.scene_analyzer is not None:
-                    scene_info = self.scene_analyzer.analyze_frame(frame, frame_idx)
-                    print(f"Scene context: {scene_info['context']}")
-                    print(f"Recommended ad types: {scene_info['suitable_ad_types']}")
-                
-                # Generate matte
-                if self.rvm_model is not None:
-                    mask, prev_fgr, prev_pha, prev_state = self.generate_matte(frame)
-                else:
-                    mask = self.segment_people(frame)
-                
-                # Find ad placement using scene information
-                ad_position = self.find_ad_placement(frame, mask, scene_info)
+            out.release()
+            print(f"Video saved to {output_path}")
             
-            # For frames between key frames, update the matte with RVM
-            elif self.rvm_model is not None and prev_pha is not None:
-                prev_frame = torch.from_numpy(frame).float().permute(2, 0, 1).unsqueeze(0) / 255.0
-                prev_frame = prev_frame.to(self.device)
-                mask, prev_fgr, prev_pha, prev_state = self.generate_matte(
-                    frame, prev_frame, prev_fgr, prev_pha, prev_state
-                )
-            
-            # If we found a position for the ad, place it
-            if ad_position is not None:
-                frame = self.place_ad(frame, ad_img, ad_position, scene_info=scene_info)
-            
-            # Write the frame to the output video
-            out.write(frame)
-            frame_idx += 1
-            
-        # Release resources
-        cap.release()
-        out.release()
-        print(f"Video processing complete. Output saved to {output_path}")
+        return results
