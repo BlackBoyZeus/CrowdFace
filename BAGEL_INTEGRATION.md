@@ -1,0 +1,1 @@
+# BAGEL Integration\n\nThis branch integrates the BAGEL model from ByteDance-Seed/Bagel for advanced scene understanding and contextual ad placement.\n\nThe notebook is available as a gist: https://gist.github.com/BlackBoyZeus/148c0c0687f824e09d76815c5f8706e5
