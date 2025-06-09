@@ -1,89 +1,93 @@
-# BAGEL Integration for CrowdFace
+# BAGEL Integration in CrowdFace
 
-This document describes the integration of BAGEL (ByteDance Ad Generation and Embedding Library) into the CrowdFace system.
+This document describes the integration of ByteDance's BAGEL (ByteDance Ad Generation and Embedding Library) into the CrowdFace system.
 
 ## Overview
 
-BAGEL enhances CrowdFace with intelligent scene understanding and contextual ad placement capabilities. The integration consists of three main components:
+BAGEL is an advanced AI system developed by ByteDance that provides intelligent ad placement capabilities. In CrowdFace, BAGEL is used to analyze video frames and determine optimal locations for ad placement based on scene understanding and content analysis.
 
-1. **Scene Understanding**: Analyzes video frames to extract context, mood, and objects
-2. **Ad Placement**: Determines optimal ad placement based on scene context
-3. **Ad Optimization**: Modifies ad content to better match the scene context
+## Integration Architecture
 
-## Implementation
+The integration follows these key principles:
 
-The BAGEL integration is implemented in the following files:
+1. **Loose Coupling**: CrowdFace can function without BAGEL, falling back to basic placement algorithms
+2. **Seamless Enhancement**: When BAGEL is available, it enhances ad placement with advanced features
+3. **Consistent API**: The same API is used regardless of whether BAGEL is available
 
-- `src/python/bagel/scene_understanding.py`: Scene analysis using BAGEL model
-- `src/python/bagel/ad_placement.py`: Intelligent ad placement
-- `src/python/bagel/ad_optimization.py`: Context-aware ad content optimization
-- `src/python/bagel_loader.py`: Utility for loading BAGEL model
-- `src/python/crowdface_pipeline.py`: Main pipeline integrating all components
+## Setup Instructions
+
+### 1. Clone the BAGEL Repository
+
+```bash
+git clone https://github.com/ByteDance-Seed/Bagel.git
+```
+
+The repository should be cloned into the root directory of the CrowdFace project.
+
+### 2. Install BAGEL Dependencies
+
+```bash
+cd Bagel
+pip install -r requirements.txt
+```
+
+### 3. Set Environment Variables
+
+For Hugging Face model access:
+
+```bash
+export HUGGINGFACE_TOKEN=your_token_here
+```
 
 ## Usage
 
-```python
-# Import required modules
-from src.python.bagel_loader import load_bagel_model
-from src.python.crowdface_pipeline import CrowdFacePipeline
+The BAGEL integration is handled through the `BAGELWrapper` class in `src/python/bagel_loader.py`. This wrapper provides:
 
-# Load BAGEL model
-bagel_model, bagel_inferencer = load_bagel_model("models/BAGEL-7B-MoT")
-
-# Initialize pipeline
-pipeline = CrowdFacePipeline(
-    sam_model=sam_model,
-    sam_processor=sam_processor,
-    rvm_model=rvm_model,
-    bagel_inferencer=bagel_inferencer
-)
-
-# Process video
-pipeline.process_video(
-    video_path="input.mp4",
-    ad_image="ad.png",
-    output_path="output.mp4"
-)
-```
+1. **Model Loading**: Handles loading the BAGEL models with appropriate error handling
+2. **Frame Analysis**: Processes video frames to determine optimal ad placement
+3. **Fallback Mechanisms**: Provides basic functionality when BAGEL is unavailable
 
 ## Key Features
 
+When integrated with BAGEL, CrowdFace gains these additional capabilities:
+
 ### Scene Understanding
 
-The `BAGELSceneUnderstanding` class analyzes video frames to extract:
+BAGEL analyzes the video content to understand:
+- Scene type (indoor/outdoor, crowd density, etc.)
+- Visual context and mood
+- Audience demographics
 
-- **Context**: Outdoor/indoor, crowded/spacious, urban/rural, etc.
-- **Objects**: People, cars, buildings, etc.
-- **Mood**: Happy, serious, relaxed, energetic, tense
-- **Ad Type Recommendations**: Based on scene context
+### Intelligent Ad Placement
 
-### Ad Placement
+Based on scene analysis, BAGEL determines:
+- Optimal ad placement locations
+- Appropriate ad sizes and styles
+- Contextual relevance scoring
 
-The `BAGELAdPlacement` class determines optimal ad placement:
+### Ad Effectiveness Prediction
 
-- Analyzes scene context to decide where ads should appear
-- Places ads in appropriate locations (right, left, top, bottom)
-- Avoids placing ads over important scene elements
+BAGEL can predict:
+- Viewer attention patterns
+- Ad visibility metrics
+- Potential engagement levels
 
-### Ad Optimization
+## Implementation Details
 
-The `BAGELAdOptimization` class modifies ad content:
+The integration is implemented in three main components:
 
-- Adjusts ad style to match scene mood
-- Optimizes ad content based on scene context
-- Caches optimized ads for efficiency
+1. **BAGELWrapper** (`src/python/bagel_loader.py`): Handles loading and initializing BAGEL
+2. **CrowdFacePipeline** (`src/python/crowdface_pipeline.py`): Uses BAGEL for ad placement
+3. **Main Module** (`src/python/main.py`): Orchestrates the integration
 
-## Notebook Demo
+## Fallback Mechanism
 
-A Jupyter notebook demonstrating the BAGEL integration is available at:
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/BlackBoyZeus/CrowdFace/blob/main/CrowdFace_Demo.ipynb)
+When BAGEL is unavailable, CrowdFace falls back to a basic placement algorithm that:
+1. Identifies people in the frame using segmentation masks
+2. Places ads in empty spaces, typically to the right of detected people
+3. Ensures ads don't overlap with important content
 
-## Requirements
+## References
 
-- Python 3.10+
-- PyTorch
-- OpenCV
-- Transformers
-- Accelerate
-- Hugging Face Hub
-- BAGEL model weights (available from ByteDance)
+- [BAGEL GitHub Repository](https://github.com/ByteDance-Seed/Bagel)
+- [ByteDance Research](https://bytedance.com/en/research)

@@ -1,39 +1,45 @@
 """
-CrowdFace Python API
-Neural-Adaptive Crowd Segmentation with Contextual Pixel-Space Advertisement Integration
+CrowdFace Pipeline Implementation
+
+This module provides the core functionality for the CrowdFace system,
+which combines SAM2 (Segment Anything Model 2), RVM (Robust Video Matting),
+and BAGEL (ByteDance Ad Generation and Embedding Library) for neural-adaptive
+crowd segmentation with contextual pixel-space advertisement integration.
 """
 
 import os
-import cv2
-import numpy as np
+import sys
 import torch
+import numpy as np
+import cv2
 from PIL import Image
-from typing import List, Tuple, Optional, Union
+from tqdm import tqdm
+import logging
 
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 class CrowdFacePipeline:
-    """Main pipeline for CrowdFace video processing with ad integration"""
+    """
+    Main pipeline for CrowdFace system that handles segmentation, matting,
+    and ad placement in videos.
+    """
     
-    def __init__(
-        self,
-        sam_model,
-        sam_processor,
-        rvm_model,
-        bagel_inferencer=None
-    ):
+    def __init__(self, sam_model=None, sam_processor=None, rvm_model=None, bagel_integration=None):
         """
-        Initialize the CrowdFace pipeline
+        Initialize the CrowdFace pipeline with optional models.
         
         Args:
             sam_model: SAM2 model for segmentation
-            sam_processor: SAM2 processor for image preprocessing
+            sam_processor: SAM2 processor for input preparation
             rvm_model: RVM model for video matting
-            bagel_inferencer: BAGEL model for ad placement (optional)
+            bagel_integration: BAGEL integration for ad placement optimization
         """
         self.sam_model = sam_model
         self.sam_processor = sam_processor
         self.rvm_model = rvm_model
-        self.bagel_inferencer = bagel_inferencer
+        self.bagel_integration = bagel_integration
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
         # Initialize state variables for video processing
@@ -41,27 +47,30 @@ class CrowdFacePipeline:
         self.prev_fgr = None
         self.prev_pha = None
         self.prev_state = None
+        
+        logger.info(f"CrowdFace pipeline initialized with device: {self.device}")
+        logger.info(f"SAM2 model: {'Loaded' if sam_model else 'Not loaded'}")
+        logger.info(f"RVM model: {'Loaded' if rvm_model else 'Not loaded'}")
+        logger.info(f"BAGEL integration: {'Available' if bagel_integration else 'Not available'}")
     
-    def segment_people(self, frame: np.ndarray) -> np.ndarray:
+    def segment_people(self, frame):
         """
-        Segment people in the frame using SAM2
+        Segment people in the frame using SAM2 or fallback to a placeholder.
         
         Args:
-            frame: Input video frame
+            frame: Input video frame (numpy array)
             
         Returns:
-            Binary mask of people in the frame
+            Binary mask of segmented people (numpy array)
         """
         if self.sam_model is None or self.sam_processor is None:
             # Create a simple placeholder mask for demonstration
             mask = np.zeros((frame.shape[0], frame.shape[1]), dtype=np.uint8)
             # Add a simple ellipse as a "person"
-            cv2.ellipse(
-                mask, 
-                (frame.shape[1]//2, frame.shape[0]//2),
-                (frame.shape[1]//4, frame.shape[0]//2),
-                0, 0, 360, 255, -1
-            )
+            cv2.ellipse(mask, 
+                       (frame.shape[1]//2, frame.shape[0]//2),
+                       (frame.shape[1]//4, frame.shape[0]//2),
+                       0, 0, 360, 255, -1)
             return mask
             
         # Convert frame to RGB if it's in BGR format
@@ -103,15 +112,15 @@ class CrowdFacePipeline:
         
         return combined_mask
     
-    def generate_matte(self, frame: np.ndarray) -> np.ndarray:
+    def generate_matte(self, frame):
         """
-        Generate alpha matte using RVM
+        Generate alpha matte using RVM or fallback to segmentation.
         
         Args:
-            frame: Input video frame
+            frame: Input video frame (numpy array)
             
         Returns:
-            Alpha matte for the frame
+            Alpha matte (numpy array)
         """
         if self.rvm_model is None:
             # Fallback to simple segmentation
@@ -132,13 +141,7 @@ class CrowdFacePipeline:
                 
             # Generate matte
             with torch.no_grad():
-                fgr, pha, state = self.rvm_model(
-                    frame_tensor, 
-                    self.prev_frame, 
-                    self.prev_fgr, 
-                    self.prev_pha, 
-                    self.prev_state
-                )
+                fgr, pha, state = self.rvm_model(frame_tensor, self.prev_frame, self.prev_fgr, self.prev_pha, self.prev_state)
                 
             # Update state for next frame
             self.prev_frame = frame_tensor
@@ -153,30 +156,33 @@ class CrowdFacePipeline:
             return alpha_matte
             
         except Exception as e:
-            print(f"Error in RVM matting: {e}")
+            logger.error(f"Error in RVM matting: {e}")
             # Fallback to segmentation mask
             return self.segment_people(frame)
     
-    def find_ad_placement(self, frame: np.ndarray, mask: np.ndarray) -> Tuple[int, int]:
+    def find_ad_placement(self, frame, mask):
         """
-        Find suitable locations for ad placement
+        Find suitable locations for ad placement based on segmentation.
         
         Args:
-            frame: Input video frame
-            mask: Binary mask of people in the frame
+            frame: Input video frame (numpy array)
+            mask: Segmentation mask (numpy array)
             
         Returns:
             (x, y) coordinates for ad placement
         """
-        # Use BAGEL if available
-        if self.bagel_inferencer is not None:
+        # Use BAGEL if available for optimal placement
+        if self.bagel_integration is not None:
             try:
-                # This would be the actual BAGEL implementation
-                # For now, we'll use a placeholder
-                scene_analysis = self.bagel_inferencer.analyze_scene(frame)
-                return scene_analysis.get_optimal_placement()
+                # Get BAGEL placement recommendations
+                placement_info = self.bagel_integration.find_optimal_placement(frame, mask)
+                
+                # Extract optimal placement
+                if 'optimal_placement' in placement_info:
+                    logger.info(f"Using BAGEL placement: {placement_info['optimal_placement']}")
+                    return placement_info['optimal_placement']
             except Exception as e:
-                print(f"Error in BAGEL ad placement: {e}")
+                logger.error(f"Error in BAGEL ad placement: {e}")
                 # Fall back to basic placement
         
         # Basic placement logic
@@ -196,24 +202,18 @@ class CrowdFacePipeline:
         
         return (ad_x, ad_y)
     
-    def place_ad(
-        self, 
-        frame: np.ndarray, 
-        ad_image: Union[np.ndarray, Image.Image], 
-        position: Tuple[int, int], 
-        scale: float = 0.3
-    ) -> np.ndarray:
+    def place_ad(self, frame, ad_image, position, scale=0.3):
         """
-        Place the ad in the frame at the specified position
+        Place the ad in the frame at the specified position with alpha blending.
         
         Args:
-            frame: Input video frame
-            ad_image: Advertisement image (with alpha channel)
+            frame: Input video frame (numpy array)
+            ad_image: Advertisement image with alpha channel (numpy array or PIL Image)
             position: (x, y) coordinates for placement
-            scale: Scale factor for the ad image
+            scale: Scale factor for the ad image (0.0-1.0)
             
         Returns:
-            Frame with ad placed
+            Frame with ad placed (numpy array)
         """
         # Convert ad_image to numpy array if it's a PIL Image
         if isinstance(ad_image, Image.Image):
@@ -262,28 +262,40 @@ class CrowdFacePipeline:
             
         return result
     
-    def process_video(
-        self, 
-        frames: List[np.ndarray], 
-        ad_image: Union[np.ndarray, Image.Image], 
-        output_path: Optional[str] = None, 
-        display_results: bool = True
-    ) -> List[np.ndarray]:
+    def process_video(self, frames, ad_image=None, output_path=None, display_results=True):
         """
-        Process video frames with ad placement
+        Process video frames with ad placement.
         
         Args:
-            frames: List of video frames
-            ad_image: Advertisement image
-            output_path: Path to save the output video
-            display_results: Whether to display results
+            frames: List of video frames (numpy arrays)
+            ad_image: Advertisement image with alpha channel (numpy array or PIL Image)
+            output_path: Path to save the output video (optional)
+            display_results: Whether to display comparison results (boolean)
             
         Returns:
-            List of processed frames
+            List of processed frames (numpy arrays)
         """
-        from tqdm.auto import tqdm
-        
+        # Process video frames with ad placement
         results = []
+        
+        # Check if frames list is empty
+        if not frames:
+            logger.error("No frames to process")
+            return results
+        
+        # Generate contextual ad if not provided and BAGEL is available
+        if ad_image is None and self.bagel_integration is not None:
+            try:
+                logger.info("Generating contextual ad using BAGEL...")
+                ad_image = self.bagel_integration.generate_contextual_ad(frames[0])
+                logger.info("Ad generated successfully")
+            except Exception as e:
+                logger.error(f"Error generating ad: {e}")
+                # Create a default ad
+                ad_image = self._create_default_ad()
+        elif ad_image is None:
+            # Create a default ad
+            ad_image = self._create_default_ad()
         
         # Reset state variables
         self.prev_frame = None
@@ -291,18 +303,21 @@ class CrowdFacePipeline:
         self.prev_pha = None
         self.prev_state = None
         
+        logger.info(f"Processing {len(frames)} frames")
+        
         for i, frame in enumerate(tqdm(frames, desc="Processing frames")):
             # Every 10 frames, re-detect people and ad placement
             if i % 10 == 0:
                 mask = self.generate_matte(frame)
                 ad_position = self.find_ad_placement(frame, mask)
+                logger.debug(f"Frame {i}: Ad position = {ad_position}")
             
             # Place the ad
             result_frame = self.place_ad(frame, ad_image, ad_position)
             results.append(result_frame)
             
         # Save video if output path is provided
-        if output_path:
+        if output_path and results:
             height, width = results[0].shape[:2]
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
             out = cv2.VideoWriter(output_path, fourcc, 30, (width, height))
@@ -311,6 +326,28 @@ class CrowdFacePipeline:
                 out.write(frame)
                 
             out.release()
-            print(f"Video saved to {output_path}")
+            logger.info(f"Video saved to {output_path}")
             
         return results
+        
+    def _create_default_ad(self):
+        """
+        Create a default advertisement image.
+        
+        Returns:
+            Ad image with alpha channel
+        """
+        # Create a sample advertisement image with transparency
+        ad_width, ad_height = 500, 300
+        ad_img = np.zeros((ad_height, ad_width, 4), dtype=np.uint8)
+        
+        # Create a semi-transparent rectangle
+        cv2.rectangle(ad_img, (25, 25), (ad_width-25, ad_height-25), (0, 120, 255, 180), -1)
+        cv2.rectangle(ad_img, (25, 25), (ad_width-25, ad_height-25), (0, 0, 0, 255), 3)
+        
+        # Add text
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        cv2.putText(ad_img, "CROWDFACE", (50, 100), font, 2, (255, 255, 255, 255), 5)
+        cv2.putText(ad_img, "DEMO AD", (120, 200), font, 1.5, (255, 255, 255, 255), 3)
+        
+        return ad_img
